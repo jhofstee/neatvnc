@@ -70,6 +70,7 @@ struct fb_update_work {
 };
 
 int schedule_client_update_fb(struct nvnc_client* client);
+static void on_client_update_fb_done(void* work);
 
 #if defined(GIT_VERSION)
 EXPORT const char nvnc_version[] = GIT_VERSION;
@@ -1029,19 +1030,23 @@ static void do_client_update_fb(void* work)
 	case RFB_ENCODING_RAW:
 		raw_encode_frame(&update->frame, &client->pixfmt, fb,
 		                 &update->server_fmt, &update->region);
+		on_client_update_fb_done(work);
 		break;
 	case RFB_ENCODING_TIGHT:;
 		enum tight_quality quality = client_get_tight_quality(client);
 		tight_encode_frame(&client->tight_encoder, &update->frame,
 				&client->pixfmt, fb, &update->server_fmt,
 				&update->region, quality);
+		on_client_update_fb_done(work);
 		break;
 	case RFB_ENCODING_ZRLE:
 		zrle_encode_frame(&client->z_stream, &update->frame,
 		                  &client->pixfmt, fb, &update->server_fmt,
 		                  &update->region);
+		on_client_update_fb_done(work);
 		break;
 	default:
+		on_client_update_fb_done(work);
 		break;
 	}
 }
@@ -1143,9 +1148,13 @@ int schedule_client_update_fb(struct nvnc_client* client)
 	client_ref(client);
 	nvnc_fb_ref(fb);
 
+	/*
+	 * Note: encoding might be done directly on this thread, or spawn multiple threads
+	 * to do the work. So it is left up to do_client_update_fb, how to call
+	 * on_client_update_fb_done when finished.
+	 */
 	struct aml_work* obj =
-		aml_work_new(do_client_update_fb, on_client_update_fb_done,
-		             work, free);
+		aml_work_new(do_client_update_fb, NULL, work, free);
 	if (!obj) {
 		goto oom_failure;
 	}
