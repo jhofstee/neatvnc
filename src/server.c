@@ -1013,6 +1013,12 @@ static bool client_has_encoding(const struct nvnc_client* client,
 	return false;
 }
 
+static void on_encoding_done(void* work)
+{
+	on_client_update_fb_done(work);
+	aml_unref(work);
+}
+
 static void do_client_update_fb(void* work)
 {
 	struct fb_update_work* update = aml_get_userdata(work);
@@ -1034,10 +1040,11 @@ static void do_client_update_fb(void* work)
 		break;
 	case RFB_ENCODING_TIGHT:;
 		enum tight_quality quality = client_get_tight_quality(client);
+		aml_ref(work);
 		tight_encode_frame(&client->tight_encoder, &update->frame,
 				&client->pixfmt, fb, &update->server_fmt,
-				&update->region, quality);
-		on_client_update_fb_done(work);
+				&update->region, quality,
+				on_encoding_done, work);
 		break;
 	case RFB_ENCODING_ZRLE:
 		zrle_encode_frame(&client->z_stream, &update->frame,

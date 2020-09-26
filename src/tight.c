@@ -72,6 +72,7 @@ struct tight_zs_worker_ctx {
 
 static void do_tight_zs_work(void*);
 static void on_tight_zs_work_done(void*);
+static void tight_finish(struct tight_encoder* self);
 
 static int tight_encoder_init_stream(z_stream* zs)
 {
@@ -158,7 +159,6 @@ int tight_encoder_init(struct tight_encoder* self, uint32_t width,
 	tight_init_zs_worker(self, 3);
 
 	pthread_mutex_init(&self->wait_mutex, NULL);
-	pthread_cond_init(&self->wait_cond, NULL);
 
 	// One worker is blocked while other workers are encoding, so at least
 	// 2 are required.
@@ -169,7 +169,6 @@ int tight_encoder_init(struct tight_encoder* self, uint32_t width,
 
 void tight_encoder_destroy(struct tight_encoder* self)
 {
-	pthread_cond_destroy(&self->wait_cond);
 	pthread_mutex_destroy(&self->wait_mutex);
 
 	aml_unref(self->zs_worker[3]);
@@ -426,7 +425,7 @@ static void on_tight_zs_work_done(void* obj)
 
 	pthread_mutex_lock(&self->wait_mutex);
 	if (--self->n_jobs == 0)
-		pthread_cond_signal(&self->wait_cond);
+		tight_finish(self);
 	pthread_mutex_unlock(&self->wait_mutex);
 }
 
@@ -487,6 +486,8 @@ static void tight_finish(struct tight_encoder* self)
 		for (uint32_t x = 0; x < self->grid_width; ++x)
 			if (tight_tile(self, x, y)->state == TIGHT_TILE_ENCODED)
 				tight_finish_tile(self, x, y);
+
+	self->work_done_cb(self->work_ctx);
 }
 
 int tight_encode_frame(struct tight_encoder* self, struct vec* dst,
@@ -494,13 +495,16 @@ int tight_encode_frame(struct tight_encoder* self, struct vec* dst,
 		const struct nvnc_fb* src,
 		const struct rfb_pixel_format* sfmt,
 		struct pixman_region16* damage,
-		enum tight_quality quality)
+		enum tight_quality quality,
+		aml_callback_fn work_done_cb, void *work_ctx)
 {
 	self->dfmt = dfmt;
 	self->sfmt = sfmt;
 	self->fb = src;
 	self->dst = dst;
 	self->quality = quality;
+	self->work_done_cb = work_done_cb;
+	self->work_ctx = work_ctx;
 
 	vec_clear(dst);
 
@@ -511,14 +515,6 @@ int tight_encode_frame(struct tight_encoder* self, struct vec* dst,
 
 	if (tight_schedule_encoding_jobs(self) < 0)
 		return -1;
-
-	// TODO Change architecture so we don't have to wait here
-	pthread_mutex_lock(&self->wait_mutex);
-	while (self->n_jobs != 0)
-		pthread_cond_wait(&self->wait_cond, &self->wait_mutex);
-	pthread_mutex_unlock(&self->wait_mutex);
-
-	tight_finish(self);
 
 	return 0;
 }

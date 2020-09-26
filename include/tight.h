@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <aml.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <zlib.h>
@@ -53,8 +54,10 @@ struct tight_encoder {
 
 	struct vec* dst;
 
+	aml_callback_fn work_done_cb;
+	void * work_ctx;
+
 	pthread_mutex_t wait_mutex;
-	pthread_cond_t wait_cond;
 };
 
 int tight_encoder_init(struct tight_encoder* self, uint32_t width,
@@ -69,4 +72,6 @@ int tight_encode_frame(struct tight_encoder* self, struct vec* dst,
 		const struct nvnc_fb* src,
 		const struct rfb_pixel_format* sfmt,
 		struct pixman_region16* damage,
-		enum tight_quality quality);
+		enum tight_quality quality,
+		aml_callback_fn work_done,
+		void * work_ctx);
